@@ -9,6 +9,7 @@
 *.csproj
 *.unityproj
 *.sln
+*.userprefs
 
 
 #################
