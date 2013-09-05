@@ -8,9 +8,9 @@ To Do:
 - Implement detection of isolated islands.
 - Implement support for Rigidbody chunks.
 - Improve mesh generation.
-	- Maximize shared vertices. Currently using about twice as many as is necessary.
-		- Implement a MeshGraph data structure?
+	- ~~Maximize shared vertices. Currently using about twice as many as is necessary.~~
 	- Simplify flat surfaces. Almost like tessellation.
+		- Implement a MeshGraph data structure?
 - Implement saving and loading of terrain to and from binary files.
 - Implement texturing.
 	- Use a splat map like Unity's own Terrain type.
