@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 
 public class MarchingSquaresTerrain : MonoBehaviour
@@ -115,7 +115,7 @@ public class MarchingSquaresTerrain : MonoBehaviour
 		GetChunk (cp - up + right, true);
 	}
 	
-	public void RemoveMSChunk (MarchingSquaresChunk chunk)
+	public void RemoveChunk (MarchingSquaresChunk chunk)
 	{
 		chunks.Remove (chunk);	
 	}

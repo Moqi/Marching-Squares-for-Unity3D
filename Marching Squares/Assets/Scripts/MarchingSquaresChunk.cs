@@ -10,6 +10,7 @@ public class MarchingSquaresChunk : MonoBehaviour
 	const float min = 0f, max = 1f, mid = 0.5f;
 	bool changed = false, optimized = true, initialized;
 	byte consecutiveUpdates;
+	byte[] cells; 
 	
 	public float this [int x, int y] {
 		get {
@@ -25,14 +26,14 @@ public class MarchingSquaresChunk : MonoBehaviour
 	
 	Mesh mesh;
 	List<Vector3> vertices;
-	List<int> triangles;
+	List<int> indices;
 	
 	void Awake ()
 	{
 		mesh = new Mesh ();
 		GetComponent<MeshFilter> ().mesh = mesh;
 		vertices = new List<Vector3> ();
-		triangles = new List<int> ();
+		indices = new List<int> ();
 	}
 	
 	void Start ()
@@ -54,6 +55,9 @@ public class MarchingSquaresChunk : MonoBehaviour
 				}
 			}
 		}
+		cells = new byte[resolution*resolution];
+		for (int i = 0; i < cells.Length; i++)
+			cells[i] = 15;
 		initialized = true;
 	}
 	
@@ -104,7 +108,7 @@ public class MarchingSquaresChunk : MonoBehaviour
 	void OnDestroy ()
 	{
 		if (terrain)
-			terrain.RemoveMSChunk (this);	
+			terrain.RemoveChunk (this);	
 	}
 	
 	void Update ()
@@ -129,18 +133,19 @@ public class MarchingSquaresChunk : MonoBehaviour
 	void GenerateMesh ()
 	{		
 		vertices.Clear ();
-		triangles.Clear ();
+		indices.Clear ();
 		
 		Cell cell;
 		float xs, ys;
-		int hi = -1;
+		int highestIndex = -1;
 		
 		for (int y = 0; y < resolution - 1; y++) {
 			ys = y * scale;
 			for (int x = 0; x < resolution - 1; x++) {
 				xs = x * scale;
 				cell = GetCell (x, y);
-				hi = GenerateCellMesh (cell, xs, ys, hi);
+				cells[y*(resolution-1)+x] = (byte) cell.cellCase;
+				highestIndex = GenerateCellMesh (cell, xs, ys, highestIndex);
 			}
 		}
 		
@@ -151,7 +156,8 @@ public class MarchingSquaresChunk : MonoBehaviour
 				for (int x = 0; x < resolution - 1; x++) {
 					xs = x * scale;
 					cell = GetUpperBoundaryCell (upperNeighbor, x);
-					hi = GenerateCellMesh (cell, xs, ys, hi);
+					cells[(resolution-1)*(resolution-1)+x] = (byte) cell.cellCase;
+					highestIndex = GenerateCellMesh (cell, xs, ys, highestIndex);
 				}
 			}
 			
@@ -161,7 +167,8 @@ public class MarchingSquaresChunk : MonoBehaviour
 				for (int y = 0; y < resolution - 1; y++) {
 					ys = y * scale;
 					cell = GetRightBoundaryCell (rightNeighbor, y);
-					hi = GenerateCellMesh (cell, xs, ys, hi);
+					cells[y*(resolution-1)+resolution-1] = (byte) cell.cellCase;
+					highestIndex = GenerateCellMesh (cell, xs, ys, highestIndex);
 				}
 			}
 			
@@ -169,7 +176,8 @@ public class MarchingSquaresChunk : MonoBehaviour
 			if (upperRightNeighbor) {
 				cell = new Cell (field [resolution - 1, resolution - 1], rightNeighbor ? rightNeighbor [0, resolution - 1] : 0f, upperNeighbor ? upperNeighbor [resolution - 1, 0] : 0f, upperRightNeighbor [0, 0]);
 				cell.cellCase = GetCellCase (mid, cell.a, cell.b, cell.c, cell.d);
-				hi = GenerateCellMesh (cell, (resolution - 1) * scale, (resolution - 1) * scale, hi);
+				cells[resolution*resolution-1] = (byte) cell.cellCase;
+				highestIndex = GenerateCellMesh (cell, (resolution - 1) * scale, (resolution - 1) * scale, highestIndex);
 			}
 		}
 		
@@ -177,10 +185,7 @@ public class MarchingSquaresChunk : MonoBehaviour
 			mesh.MarkDynamic ();
 		mesh.Clear ();
 		mesh.vertices = vertices.ToArray ();
-		mesh.triangles = triangles.ToArray ();
-		
-		vertices.Clear ();
-		triangles.Clear ();
+		mesh.triangles = indices.ToArray ();
 		
 		mesh.RecalculateNormals ();
 		mesh.RecalculateBounds ();
@@ -189,245 +194,527 @@ public class MarchingSquaresChunk : MonoBehaviour
 		GetComponent<MeshCollider> ().sharedMesh = mesh;
 	}
 	
-	int GenerateCellMesh (Cell cell, float xs, float ys, int hi)
+	int GenerateCellMesh (Cell cell, float xs, float ys, int highestIndex)
 	{
+		Vector3[] newVerts;
+		List<Vector3> actual = new List<Vector3>();
+		int[] newIndices;
 		switch (cell.cellCase) {
 		case -1 :
 			Debug.LogError ("Invalid cell case!");
 			break;
-		case 0 :
-			vertices.AddRange (new Vector3[4] {
+		case 0 :			
+			newVerts = new Vector3[4] {
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs + scale, ys + scale, 0),
 				new Vector3 (xs, ys + scale, 0)
-			});
-			triangles.AddRange (new int[6] {
-				hi + 1,hi + 3,hi + 2,
-				hi + 1,hi + 4,hi + 3
-			});
-			hi += 4;
+			};			
+			
+			newIndices = new int[6];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[0] = newIndices[3] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[2] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[1] = newIndices[5] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
 			break;
 		case 1 :
-			vertices.AddRange (new Vector3[5]{
+			newVerts = new Vector3[5]{
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs + scale, ys + scale, 0),
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0)
-			});
-			triangles.AddRange (new int[9]{
-				hi + 1,hi + 5,hi + 2,
-				hi + 2,hi + 5,hi + 4,
-				hi + 2,hi + 4,hi + 3
-			});
-			hi += 5;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.c, cell.d), HLI (cell.c, cell.a)), false, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[9];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[0] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[2] = newIndices[3] = newIndices[6] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[8] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[5] = newIndices[7] = index == -1 ? highestIndex : index;
+					break;
+				case 4 :
+					newIndices[1] = newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.c, cell.d), HLI (cell.c, cell.a)), false, highestIndex);
+			highestIndex += 4;
 			break;
 		case 2 :
-			vertices.AddRange (new Vector3[5]{
+			newVerts = new Vector3[5]{
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs, ys + scale, 0),
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0)
-			});
-			triangles.AddRange (new int[9]{
-				hi + 1,hi + 3,hi + 4,
-				hi + 1,hi + 4,hi + 5,
-				hi + 1,hi + 5,hi + 2
-			});
-			hi += 5;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.c, cell.d), ys + scale), new Vector2 (HLI (cell.d, cell.c), -HLI (cell.d, cell.b)), false, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[9];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[0] = newIndices[3] = newIndices[6] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[8] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[1] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[2] = newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				case 4 :
+					newIndices[5] = newIndices[7] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.c, cell.d), ys + scale), new Vector2 (HLI (cell.d, cell.c), -HLI (cell.d, cell.b)), false, highestIndex);
+			highestIndex += 4;
 			break;					
 		case 3 :
-			vertices.AddRange (new Vector3[4] {
+			newVerts = new Vector3[4] {
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0)
-			});
-			triangles.AddRange (new int[6] {
-				hi + 1,hi + 3,hi + 2,
-				hi + 1,hi + 4,hi + 3
-			});
-			hi += 4;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (scale, HLI (cell.b, cell.d) - HLI (cell.a, cell.c)), false, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[6];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[0] = newIndices[3] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[2] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[1] = newIndices[5] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (scale, HLI (cell.b, cell.d) - HLI (cell.a, cell.c)), false, highestIndex);
+			highestIndex += 4;
 			break;
 		case 4 :
-			vertices.AddRange (new Vector3[5]{
+			newVerts = new Vector3[5]{
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs, ys + scale, 0),
 				new Vector3 (xs + scale, ys + scale, 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0)
-			});
-			triangles.AddRange (new int[9]{
-				hi + 2,hi + 3,hi + 5,
-				hi + 2,hi + 5,hi + 4,
-				hi + 2,hi + 4,hi + 1
-			});
-			hi += 5;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.b, cell.a), HLI (cell.b, cell.d)), true, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[9];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[8] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[0] = newIndices[3] = newIndices[6] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[1] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[5] = newIndices[7] = index == -1 ? highestIndex : index;
+					break;
+				case 4 :
+					newIndices[2] = newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.b, cell.a), HLI (cell.b, cell.d)), true, highestIndex);
+			highestIndex += 4;
 			break;
 		case 5 :
-			vertices.AddRange (new Vector3[6]{
+			newVerts = new Vector3[6]{
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0),
 				new Vector3 (xs + scale, ys + scale, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0),
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0)
-			});
-			triangles.AddRange (new int[6]{
-				hi + 1, hi + 2, hi + 3, hi + 4, hi + 5, hi + 6
-			});
-			hi += 6;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.a, cell.b), -HLI (cell.a, cell.c)), false, hi);
-			hi += 4;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.c, cell.d), ys + scale), new Vector2 (HLI (cell.d, cell.c), -HLI (cell.d, cell.b)), true, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[6];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				newIndices[i] = index == -1 ? highestIndex : index;
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.a, cell.b), -HLI (cell.a, cell.c)), false, highestIndex);
+			highestIndex += 4;
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.c, cell.d), ys + scale), new Vector2 (HLI (cell.d, cell.c), -HLI (cell.d, cell.b)), true, highestIndex);
+			highestIndex += 4;
 			break;
 		case 6 :
-			vertices.AddRange (new Vector3[4] {
+			newVerts = new Vector3[4] {
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0),
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0),
 				new Vector3 (xs, ys + scale, 0)
-			});
-			triangles.AddRange (new int[6] {
-				hi + 1,hi + 4,hi + 3,
-				hi + 1,hi + 3,hi + 2
-			});
-			hi += 4;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.c, cell.d) - HLI (cell.a, cell.b), scale), true, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[6];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[0] = newIndices[3] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[5] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[2] = newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[1] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.c, cell.d) - HLI (cell.a, cell.b), scale), true, highestIndex);
+			highestIndex += 4;
 			break;
 		case 7 :
-			vertices.AddRange (new Vector3[3] {
+			newVerts = new Vector3[3] {
 				new Vector3 (xs, ys, 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0)							
-			});
-			triangles.AddRange (new int[3] {
-				hi + 1,hi + 2,hi + 3
-			});
-			hi += 3;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.a, cell.b), -HLI (cell.a, cell.c)), false, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[3];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				newIndices[i] = index == -1 ? highestIndex : index;
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.a, cell.b), -HLI (cell.a, cell.c)), false, highestIndex);
+			highestIndex += 4;
 			break;
 		case 8 :
-			vertices.AddRange (new Vector3[5]{
+			newVerts = new Vector3[5]{
 				new Vector3 (xs, ys + scale, 0),
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs + scale, ys + scale, 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0)
-			});
-			triangles.AddRange (new int[9]{
-				hi + 3,hi + 5,hi + 1,
-				hi + 3,hi + 4,hi + 5,
-				hi + 3,hi + 2,hi + 4
-			});
-			hi += 5;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.a, cell.b), -HLI (cell.a, cell.c)), true, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[9];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[2] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[7] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[0] = newIndices[3] = newIndices[6] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[4] = newIndices[8] = index == -1 ? highestIndex : index;
+					break;
+				case 4 :
+					newIndices[1] = newIndices[5] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.a, cell.b), -HLI (cell.a, cell.c)), true, highestIndex);
+			highestIndex += 4;
 			break;
 		case 9 :
-			vertices.AddRange (new Vector3[4] {
+			newVerts = new Vector3[4] {
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0),
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0),
 				new Vector3 (xs + scale, ys + scale, 0)
-			});
-			triangles.AddRange (new int[6] {
-				hi + 2,hi + 3,hi + 4,
-				hi + 2,hi + 4,hi + 1
-			});
-			hi += 4;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.c, cell.d) - HLI (cell.a, cell.b), scale), false, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[6];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[5] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[0] = newIndices[3] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[1] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[2] = newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);			
+			
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.c, cell.d) - HLI (cell.a, cell.b), scale), false, highestIndex);
+			highestIndex += 4;
 			break;
 		case 10 :
-			vertices.AddRange (new Vector3[6]{
+			newVerts = new Vector3[6]{
 				new Vector3 (xs, ys + scale, 0),
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0),
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0)
-			});
-			triangles.AddRange (new int[6]{
-				hi + 1, hi + 2, hi + 3, hi + 4, hi + 5, hi + 6
-			});
-			hi += 6;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.c, cell.d), HLI (cell.c, cell.a)), true, hi);
-			hi += 4;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.b, cell.a), HLI (cell.b, cell.d)), false, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[6];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				newIndices[i] = index == -1 ? highestIndex : index;
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.c, cell.d), HLI (cell.c, cell.a)), true, highestIndex);
+			highestIndex += 4;
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.b, cell.a), HLI (cell.b, cell.d)), false, highestIndex);
+			highestIndex += 4;
 			break;
 		case 11 :
-			vertices.AddRange (new Vector3[3] {
+			newVerts = new Vector3[3] {
 				new Vector3 (xs + scale, ys, 0),
 				new Vector3 (xs + HLI (cell.a, cell.b), ys, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0)							
-			});
-			triangles.AddRange (new int[3] {
-				hi + 1,hi + 2,hi + 3
-			});
-			hi += 3;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.b, cell.a), HLI (cell.b, cell.d)), false, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[3];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				newIndices[i] = index == -1 ? highestIndex : index;
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.a, cell.b), ys), new Vector2 (HLI (cell.b, cell.a), HLI (cell.b, cell.d)), false, highestIndex);
+			highestIndex += 4;
 			break;
 		case 12 :
-			vertices.AddRange (new Vector3[4] {
+			newVerts = new Vector3[4] {
 				new Vector3 (xs, ys + scale, 0),
 				new Vector3 (xs + scale, ys + scale, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0)
-			});
-			triangles.AddRange (new int[6] {
-				hi + 4,hi + 1,hi + 2,
-				hi + 4,hi + 2,hi + 3
-			});
-			hi += 4;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (scale, HLI (cell.b, cell.d) - HLI (cell.a, cell.c)), true, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[6];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				switch(i){
+				case 0 :
+					newIndices[1] = index == -1 ? highestIndex : index;
+					break;
+				case 1 :
+					newIndices[2] = newIndices[4] = index == -1 ? highestIndex : index;
+					break;
+				case 2 :
+					newIndices[5] = index == -1 ? highestIndex : index;
+					break;
+				case 3 :
+					newIndices[0] = newIndices[3] = index == -1 ? highestIndex : index;
+					break;
+				}
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (scale, HLI (cell.b, cell.d) - HLI (cell.a, cell.c)), true, highestIndex);
+			highestIndex += 4;
 			break;
 		case 13 :
-			vertices.AddRange (new Vector3[3] {
+			newVerts = new Vector3[3] {
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0),
 				new Vector3 (xs + scale, ys + scale, 0),
 				new Vector3 (xs + scale, ys + HLI (cell.b, cell.d), 0)							
-			});
-			triangles.AddRange (new int[3] {
-				hi + 1,hi + 2,hi + 3
-			});
-			hi += 3;
-			GenerateCellEdge (new Vector2 (xs + HLI (cell.c, cell.d), ys + scale), new Vector2 (HLI (cell.d, cell.c), -HLI (cell.d, cell.b)), true, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[3];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				newIndices[i] = index == -1 ? highestIndex : index;
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs + HLI (cell.c, cell.d), ys + scale), new Vector2 (HLI (cell.d, cell.c), -HLI (cell.d, cell.b)), true, highestIndex);
+			highestIndex += 4;
 			break;
 		case 14 :
-			vertices.AddRange (new Vector3[3] {
+			newVerts = new Vector3[3] {
 				new Vector3 (xs, ys + scale, 0),
 				new Vector3 (xs + HLI (cell.c, cell.d), ys + scale, 0),
 				new Vector3 (xs, ys + HLI (cell.a, cell.c), 0)							
-			});
-			triangles.AddRange (new int[3] {
-				hi + 1,hi + 2,hi + 3
-			});
-			hi += 3;
-			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.c, cell.d), HLI (cell.c, cell.a)), true, hi);
-			hi += 4;
+			};
+			
+			newIndices = new int[3];
+			
+			for (int i = 0; i < newVerts.Length; i++) {
+				int index = vertices.IndexOf(newVerts[i]);
+				if (index == -1){
+					actual.Add(newVerts[i]);
+					highestIndex++;
+				}
+				newIndices[i] = index == -1 ? highestIndex : index;
+			}
+			
+			vertices.AddRange(actual);
+			indices.AddRange(newIndices);
+			
+			GenerateCellEdge (new Vector2 (xs, ys + HLI (cell.a, cell.c)), new Vector2 (HLI (cell.c, cell.d), HLI (cell.c, cell.a)), true, highestIndex);
+			highestIndex += 4;
 			break;
-		case 15 :
+		default :			
 			break;
 		}
-		return hi;
+		return highestIndex;
 	}
 	
 	void GenerateCellEdge (Vector2 origin, Vector2 edge, bool ccw, int hi)
@@ -439,12 +726,12 @@ public class MarchingSquaresChunk : MonoBehaviour
 			new Vector3 (origin.x + edge.x, origin.y + edge.y, depth)
 		});
 		if (ccw)
-			triangles.AddRange (new int[6]{
+			indices.AddRange (new int[6]{
 				hi + 1, hi + 4, hi + 3,
 				hi + 1, hi + 2, hi + 4
 			});
 		else
-			triangles.AddRange (new int[6]{
+			indices.AddRange (new int[6]{
 				hi + 1, hi + 3, hi + 4,
 				hi + 1, hi + 4, hi + 2
 			});
