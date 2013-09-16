@@ -452,7 +452,7 @@ public class MarchingSquaresChunk : MonoBehaviour
 	
 	float HLI (float a, float b)
 	{
-		return scale * (0.5f - a) / (b - a);	
+		return scale * (mid - a) / (b - a);	
 	}
 	
 	Cell GetCell (int x, int y)
